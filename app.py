@@ -62,7 +62,7 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-# --- 5. 데이터 연결 및 상세 정보 출력 함수 ---
+# --- 5. 데이터 연결 및 전처리 ---
 url = "https://docs.google.com/spreadsheets/d/1PP1HV-NWs3c_QjwuIVBu4H5gLl_A78JbPBLcTrVaz4A/edit?usp=sharing"
 conn = st.connection("gsheets", type=GSheetsConnection)
 df = conn.read(spreadsheet=url).dropna(how='all', axis=1).fillna("")
@@ -84,6 +84,9 @@ df.rename(columns=col_mapping, inplace=True)
 
 for c in ['카테고리', '상호명', '메뉴', '가격', '거리', '예약', '특징', '지도', '사진']:
     if c not in df.columns: df[c] = ""
+
+# 💰 [핵심] 가성비 계산을 위해 '가격' 열을 순수한 숫자로 변환
+df['숫자가격'] = pd.to_numeric(df['가격'].astype(str).str.replace(',', '').str.replace('원', ''), errors='coerce').fillna(999999)
 
 # 상세 정보 카드 함수
 def show_restaurant_card(row, ai_reason="취향을 저격할 맛집입니다!"):
@@ -115,54 +118,83 @@ if st.button("🎲 오늘 날씨에 딱 맞는 메뉴 랜덤 추천!", use_conta
     st.balloons()
     show_restaurant_card(filtered_df.sample(n=1).iloc[0], f"오늘 같은 {condition} 날씨에 완벽한 메뉴를 골라봤어요!")
 
-# --- 7. 💬 완전 지능형 챗봇 (불필요한 단어 완벽 필터링) ---
+# --- 7. 💬 완전 지능형 챗봇 (가성비 + 감성 + 방해단어 철벽방어) ---
 st.write("")
-if prompt := st.chat_input("예: 예약가능한 부대찌개집, 해장 메뉴, 배 안 고파"):
+if prompt := st.chat_input("예: 만원 이하 가성비 맛집, 추울 때 먹을 메뉴"):
     with st.chat_message("user"):
         st.write(prompt)
     
     with st.chat_message("assistant"):
         res = df.copy()
         ai_msg = "분석을 완료했습니다! 이 곳은 어떠신가요?"
+        condition_applied = False # 조건이 하나라도 적용되었는지 체크
         
-        # 💡 [필터 1] 감성 및 상태 파악
         prompt_nospace = prompt.replace(" ", "")
-        if any(w in prompt_nospace for w in ["안고파", "안고픈", "배불", "가볍", "간단", "다이어트"]):
-            res = res[res['메뉴'].str.contains("샐러드|포케|샌드위치|김밥|국수|우동") | res['특징'].str.contains("가벼운|가볍|다이어트|간단")]
-            ai_msg = "배가 많이 안 고프실 땐 무겁지 않고 가벼운 이 메뉴를 추천해 드려요!"
         
-        # 💡 [필터 2] 예약 여부 파악
+        # 💡 [필터 1] 가성비 / 가격 파악 (만원 이하)
+        if any(w in prompt_nospace for w in ["만원이하", "만엔이하", "10000원이하", "가성비", "저렴", "싼"]):
+            # 숫자가격이 10000 이하인 곳만 필터링!
+            res = res[res['숫자가격'] <= 10000]
+            ai_msg = "가성비 최고! 10,000원 이하로 든든하게 드실 수 있는 곳으로 골랐어요! 💸"
+            condition_applied = True
+            
+        # 💡 [필터 2] 감성 및 날씨 파악
+        if any(w in prompt_nospace for w in ["추울", "추운", "춥다", "쌀쌀", "따뜻", "뜨끈"]):
+            res = res[res['메뉴'].str.contains("찌개|국밥|탕|샤브|전골|국수|우동|칼국수|수제비|짬뽕") | res['특징'].str.contains("따뜻|뜨끈|국물")]
+            ai_msg = "쌀쌀한 날씨엔 역시 속까지 데워주는 뜨끈한 국물이 최고죠! 🍲"
+            condition_applied = True
+        elif any(w in prompt_nospace for w in ["해장", "술", "숙취"]):
+            res = res[res['메뉴'].str.contains("국밥|짬뽕|탕|찌개|해장|순대국|마라탕") | res['특징'].str.contains("해장|얼큰|시원")]
+            ai_msg = "속이 확 풀리는 해장 메뉴로 골라봤습니다. 땀 한 바가지 흘려보시죠! 🥵"
+            condition_applied = True
+        elif any(w in prompt_nospace for w in ["안고파", "안고픈", "배불", "가볍", "간단", "다이어트"]):
+            res = res[res['메뉴'].str.contains("샐러드|포케|샌드위치|김밥|국수|우동") | res['특징'].str.contains("가벼운|가볍|다이어트|간단")]
+            ai_msg = "배가 많이 안 고프실 땐 가벼운 이 메뉴를 추천해 드려요! 🥗"
+            condition_applied = True
+        
+        # 💡 [필터 3] 예약 여부 파악
         if "예약" in prompt:
             res = res[res['예약'].astype(str).str.upper().str.contains("O", na=False)]
-            ai_msg = "요청하신 예약 가능한 식당으로 찾았습니다!"
+            ai_msg = "요청하신 예약 가능한 식당으로 찾았습니다! 🗓️"
+            condition_applied = True
             
-        # 💡 [필터 3] 강력한 금지어 사전 (메뉴, 음식, 집, 곳 등 꼬리표 무조건 삭제)
+        # 💡 [필터 4] 강력한 금지어(방해 단어) 삭제!
         safe_to_remove = [
+            "만원 이하", "만원이하", "만 원 이하", "만원", "10000원", "가성비로", "가성비", "저렴한", "싼",
             "예약 가능한", "예약가능한", "예약되는", "예약",
             "추천해줘", "추천해주세요", "추천해", "추천", "알려줘", "찾아줘", "골라줘",
+            "추울 때", "추울때", "추운 날", "추운날", "추울", "추운", "춥다", "쌀쌀할 때", "쌀쌀", "따뜻한", "뜨끈한",
+            "해장할", "해장", "숙취", "술 깨는",
             "배 많이 안 고픈데", "배 많이 안고픈데", "배 안 고픈데", "배 안고픈데", "배가 안 고파", "배 안 고파",
-            "가벼운 거", "간단한 거",
             "뭐 먹을까", "뭐 먹지", "뭐먹지", "뭐먹을까", "먹을까", "먹지", "어때", "어디가", "좋지", "어디야",
+            "할만한", "할 만한", "먹을 만한", "먹을만한", "먹을", "먹기 좋은",
             "맛집", "음식점", "식당", "메뉴", "음식", "점심", "저녁", "오늘", "내일", "집", "곳"
         ]
         
         clean_kw = prompt
-        # 이제 "집" 같은 단어가 붙어있어도 다 떼어냅니다!
         for word in safe_to_remove:
             clean_kw = clean_kw.replace(word, " ")
         
-        # 특수문자(?, ! 등) 지우고 띄어쓰기 기준으로 쪼개기
+        # 특수문자 지우고 쪼개기
         clean_kw = re.sub(r'[^\w\s]', '', clean_kw)
         words = clean_kw.split()
         
-        # 은, 는, 이, 가 같은 조사 한 번 더 걸러내기
-        final_keywords = [w for w in words if w not in ["은", "는", "이", "가", "을", "를", "좀", "데", "거", "요"]]
+        # 조사 한 번 더 걸러내기
+        final_keywords = [w for w in words if w not in ["은", "는", "이", "가", "을", "를", "좀", "데", "거", "요", "때", "로", "으로"]]
 
-        # 💡 [필터 4] 최종 남은 알짜배기 단어로 다중 검색
+        # 💡 [필터 5] 키워드 검색 & 똑똑한 폴백(Fallback) 안전장치
+        backup_res = res.copy() # 키워드 검색 전 상태 임시 저장
+        
         for kw in final_keywords:
             res = res[res['카테고리'].str.contains(kw) | res['상호명'].str.contains(kw) | res['메뉴'].str.contains(kw) | res['특징'].str.contains(kw)]
 
-        # 결과 도출
+        # 만약 키워드로 검색했더니 다 날아가서 0개가 되었다면? 
+        # (예: '추울 때 먹을 메뉴 추천해줘' -> 검색어 다 지워져서 남은 단어 없음 or 엉뚱한 단어 남음)
+        if res.empty and condition_applied and not backup_res.empty:
+            res = backup_res # 아까 필터링해 둔(가성비, 해장, 뜨끈한 국물 등) 리스트를 다시 가져옴!
+            ai_msg = "정확한 단어는 없지만, 말씀하신 조건(가성비/날씨 등)에 완벽하게 맞는 곳으로 골라봤어요!"
+
+        # 최종 결과 출력
         if not res.empty:
             choice = res.sample(n=1).iloc[0]
             show_restaurant_card(choice, ai_msg)
@@ -171,7 +203,7 @@ if prompt := st.chat_input("예: 예약가능한 부대찌개집, 해장 메뉴,
                 with st.expander(f"조건에 맞는 다른 후보지 {len(res)-1}곳 더 보기"):
                     st.dataframe(res[['카테고리', '상호명', '메뉴', '가격', '예약']], hide_index=True)
         else:
-            st.error(f"앗, 데이터베이스에 조건에 맞는 곳이 아직 없네요 ㅠㅠ 다른 메뉴를 말씀해 주시겠어요?")
+            st.error(f"앗, 데이터베이스에 조건에 맞는 곳이 아직 없네요 ㅠㅠ 다른 조건을 말씀해 주시겠어요?")
 
 # --- 8. 사이드바 ---
 with st.sidebar:
