@@ -123,7 +123,7 @@ if prompt := st.chat_input("예: 예약가능한 부대찌개집, 해장 메뉴,
     
     with st.chat_message("assistant"):
         res = df.copy()
-        ai_msg = "분석을 완료했습니다! 이 집은 어떠신가요?"
+        ai_msg = "분석을 완료했습니다! 이 곳은 어떠신가요?"
         
         # 💡 [필터 1] 감성 및 상태 파악
         prompt_nospace = prompt.replace(" ", "")
@@ -136,17 +136,18 @@ if prompt := st.chat_input("예: 예약가능한 부대찌개집, 해장 메뉴,
             res = res[res['예약'].astype(str).str.upper().str.contains("O", na=False)]
             ai_msg = "요청하신 예약 가능한 식당으로 찾았습니다!"
             
-        # 💡 [필터 3] 강력한 금지어 사전 (메뉴, 음식 등 추가)
+        # 💡 [필터 3] 강력한 금지어 사전 (메뉴, 음식, 집, 곳 등 꼬리표 무조건 삭제)
         safe_to_remove = [
             "예약 가능한", "예약가능한", "예약되는", "예약",
             "추천해줘", "추천해주세요", "추천해", "추천", "알려줘", "찾아줘", "골라줘",
             "배 많이 안 고픈데", "배 많이 안고픈데", "배 안 고픈데", "배 안고픈데", "배가 안 고파", "배 안 고파",
             "가벼운 거", "간단한 거",
             "뭐 먹을까", "뭐 먹지", "뭐먹지", "뭐먹을까", "먹을까", "먹지", "어때", "어디가", "좋지", "어디야",
-            "맛집", "음식점", "식당", "메뉴", "음식", "점심", "저녁", "오늘", "내일"
+            "맛집", "음식점", "식당", "메뉴", "음식", "점심", "저녁", "오늘", "내일", "집", "곳"
         ]
         
         clean_kw = prompt
+        # 이제 "집" 같은 단어가 붙어있어도 다 떼어냅니다!
         for word in safe_to_remove:
             clean_kw = clean_kw.replace(word, " ")
         
@@ -154,8 +155,8 @@ if prompt := st.chat_input("예: 예약가능한 부대찌개집, 해장 메뉴,
         clean_kw = re.sub(r'[^\w\s]', '', clean_kw)
         words = clean_kw.split()
         
-        # 은, 는, 이, 가 같은 조사와 꼬리표 단어 한 번 더 걸러내기
-        final_keywords = [w for w in words if w not in ["집", "곳", "뭐", "좀", "데", "거", "요", "은", "는", "이", "가", "을", "를"]]
+        # 은, 는, 이, 가 같은 조사 한 번 더 걸러내기
+        final_keywords = [w for w in words if w not in ["은", "는", "이", "가", "을", "를", "좀", "데", "거", "요"]]
 
         # 💡 [필터 4] 최종 남은 알짜배기 단어로 다중 검색
         for kw in final_keywords:
