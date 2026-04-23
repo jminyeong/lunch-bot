@@ -2,13 +2,14 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import requests
+import re
 
 # 1. 앱 설정
 st.set_page_config(page_title="오점뭐?!", page_icon="🍜")
 
 st.title("🍜 오점뭐?!")
 st.caption("'오늘은 뭐 먹지?' 직장인 최대 고민 해결✨")
-st.write("")
+st.divider()
 
 # --- 2. 실시간 날씨 정보 가져오기 ---
 @st.cache_data(ttl=600)
@@ -28,7 +29,7 @@ def get_detailed_weather():
 
 temp, feels_like, humidity, wind, rain, condition, weather_tag = get_detailed_weather()
 
-# --- 3. [현재 정보] 디자인 복구 (큰 온도 글씨) ---
+# --- 3. [대시보드] 현재 정보 디자인 ---
 st.subheader("현재 정보")
 c1, c2 = st.columns([1, 1.2])
 with c1:
@@ -39,7 +40,9 @@ with c2:
     st.markdown(f"<div style='line-height:1.1;'><span style='font-size:45px; font-weight:800;'>{temp}℃</span> <span style='font-size:20px; color:#666;'>(체감 {feels_like}℃)</span></div>", unsafe_allow_html=True)
 st.caption(f"습도 {humidity}% | 강수 {rain}mm | 풍속 {wind}m/s | 하늘: {condition}")
 
-# --- 4. [AI 규칙 박스] 디자인 복구 (빨간 아이콘/테두리) ---
+st.write("")
+
+# --- 4. [AI 규칙 박스] ---
 st.markdown(f"""
 <div style="background-color: #f0f2f6; padding: 20px; border-radius: 12px; border-left: 5px solid #ff4b4b;">
     <div style="display: flex; align-items: center; margin-bottom: 15px;">
@@ -50,10 +53,10 @@ st.markdown(f"""
     </div>
     <h3 style="font-size: 18px; margin-bottom: 5px;">입력 정보</h3>
     <ul style="margin-bottom: 15px;"><li>온도: "{temp}℃" | 하늘: "{condition}"</li></ul>
-    <h3 style="font-size: 18px; margin-bottom: 5px;">음식 문화 규칙</h3>
+    <h3 style="font-size: 18px; margin-bottom: 5px;">한국 음식 문화 규칙</h3>
     <ol style="font-size: 14px; line-height: 1.6;">
         <li>비가 오면 국물, 전, 칼국수, 수제비 선호</li>
-        <li>추우면 뜨끈한 찌개, 더우면 시원한 면류나 샐러드 선호</li>
+        <li>더우면 냉면이나 샐러드, 추우면 찌개나 뜨거운 국물 선호</li>
         <li>회식 다음 날은 무조건 해장 키워드 반영</li>
     </ol>
 </div>
@@ -64,7 +67,7 @@ url = "https://docs.google.com/spreadsheets/d/1PP1HV-NWs3c_QjwuIVBu4H5gLl_A78JbP
 conn = st.connection("gsheets", type=GSheetsConnection)
 df = conn.read(spreadsheet=url).dropna(how='all', axis=1).fillna("")
 
-# 열 이름 자동 매칭 (카테고리 포함)
+# 열 이름 자동 매칭
 col_mapping = {}
 for col in df.columns:
     c = str(col).lower().replace(" ", "")
@@ -79,25 +82,27 @@ for col in df.columns:
     elif '사진' in c or 'image' in c: col_mapping[col] = '사진'
 df.rename(columns=col_mapping, inplace=True)
 
-# 필수 열 안전장치
 for c in ['카테고리', '상호명', '메뉴', '가격', '거리', '예약', '특징', '지도', '사진']:
     if c not in df.columns: df[c] = ""
 
-def show_result_detail(choice, reason="AI가 추천하는 오늘의 맛집입니다!"):
-    st.write(f"🤖 **추천 사유:** {reason}")
-    if choice['사진'] != "": st.image(choice['사진'], use_container_width=True)
-    st.success(f"**[{choice['상호명']}]** ({choice['카테고리']})")
+# 상세 정보 카드 함수
+def show_restaurant_card(row, ai_reason="취향을 저격할 맛집입니다!"):
+    st.write(f"🤖 **AI 추천 포인트:** {ai_reason}")
+    if row['사진'] != "":
+        st.image(row['사진'], use_container_width=True)
+    st.success(f"**[{row['상호명']}]** ({row['카테고리']})")
     cc1, cc2 = st.columns(2)
     with cc1:
-        st.write(f"🍴 **메뉴:** {choice['메뉴']}")
-        st.write(f"💰 **가격:** {choice['가격']}원")
+        st.write(f"🍴 **대표메뉴:** {row['메뉴']}")
+        st.write(f"💰 **가격:** {row['가격']}원")
     with cc2:
-        st.write(f"📍 **거리:** {choice['거리']}")
-        st.write(f"🗓️ **예약:** {choice['예약']}")
-    st.info(f"💬 **특징:** {choice['특징']}")
-    if choice['지도'] != "": st.markdown(f"[🗺️ 네이버 지도 보기]({choice['지도']})")
+        st.write(f"📍 **도보 거리:** {row['거리']}")
+        st.write(f"🗓️ **예약:** {row['예약']}")
+    st.info(f"💬 **특징:** {row['특징']}")
+    if row['지도'] != "":
+        st.markdown(f"[🗺️ 네이버 지도에서 바로보기]({row['지도']})")
 
-# --- 6. 추천 버튼 ---
+# --- 6. 🎲 랜덤 추천 버튼 ---
 st.write("---")
 if st.button("🎲 오늘 날씨에 딱 맞는 메뉴 랜덤 추천!", use_container_width=True):
     kw = []
@@ -108,49 +113,66 @@ if st.button("🎲 오늘 날씨에 딱 맞는 메뉴 랜덤 추천!", use_conta
     filtered_df = df[df['메뉴'].str.contains(pattern) | df['특징'].str.contains(pattern)]
     if filtered_df.empty: filtered_df = df
     st.balloons()
-    show_result_detail(filtered_df.sample(n=1).iloc[0], "현재 날씨와 직장인 규칙을 분석해 골라봤어요!")
+    show_restaurant_card(filtered_df.sample(n=1).iloc[0], f"오늘 같은 {condition} 날씨에 완벽한 메뉴를 골라봤어요!")
 
-# --- 7. 💬 지능형 챗봇 (이미지 속 모든 상황 대응!) ---
-if prompt := st.chat_input("예: 예약 가능한 부대찌개집, 쌀국수 추천해줘, 배 안 고파"):
-    with st.chat_message("user"): st.write(prompt)
+# --- 7. 💬 완전 지능형 챗봇 (불필요한 단어 완벽 필터링) ---
+st.write("")
+if prompt := st.chat_input("예: 예약가능한 부대찌개집, 해장 메뉴, 배 안 고파"):
+    with st.chat_message("user"):
+        st.write(prompt)
+    
     with st.chat_message("assistant"):
         res = df.copy()
-        reason = "사용자님의 취향에 딱 맞는 곳을 찾았습니다!"
+        ai_msg = "분석을 완료했습니다! 이 집은 어떠신가요?"
         
-        # 💡 지능형 필터링 (키워드 분해 검색)
-        # 1. 상태/일상어 이해
-        if "배 안 고파" in prompt or "가볍" in prompt or "다이어트" in prompt:
-            res = res[res['메뉴'].str.contains("샐러드|포케|샌드위치|우동") | res['특징'].str.contains("가벼운|샐러드")]
-            reason = "입맛이 없으실 땐 가벼운 샐러드나 면 요리가 부담 없죠!"
+        # 💡 [필터 1] 감성 및 상태 파악
+        prompt_nospace = prompt.replace(" ", "")
+        if any(w in prompt_nospace for w in ["안고파", "안고픈", "배불", "가볍", "간단", "다이어트"]):
+            res = res[res['메뉴'].str.contains("샐러드|포케|샌드위치|김밥|국수|우동") | res['특징'].str.contains("가벼운|가볍|다이어트|간단")]
+            ai_msg = "배가 많이 안 고프실 땐 무겁지 않고 가벼운 이 메뉴를 추천해 드려요!"
         
-        # 2. 예약 여부
+        # 💡 [필터 2] 예약 여부 파악
         if "예약" in prompt:
             res = res[res['예약'].astype(str).str.upper().str.contains("O", na=False)]
+            ai_msg = "요청하신 예약 가능한 식당으로 찾았습니다!"
+            
+        # 💡 [필터 3] 강력한 금지어 사전 (메뉴, 음식 등 추가)
+        safe_to_remove = [
+            "예약 가능한", "예약가능한", "예약되는", "예약",
+            "추천해줘", "추천해주세요", "추천해", "추천", "알려줘", "찾아줘", "골라줘",
+            "배 많이 안 고픈데", "배 많이 안고픈데", "배 안 고픈데", "배 안고픈데", "배가 안 고파", "배 안 고파",
+            "가벼운 거", "간단한 거",
+            "뭐 먹을까", "뭐 먹지", "뭐먹지", "뭐먹을까", "먹을까", "먹지", "어때", "어디가", "좋지", "어디야",
+            "맛집", "음식점", "식당", "메뉴", "음식", "점심", "저녁", "오늘", "내일"
+        ]
         
-        # 3. 카테고리 감지
-        for cat in ["한식", "일식", "중식", "양식", "아시안"]:
-            if cat in prompt: res = res[res['카테고리'].str.contains(cat)]
-
-        # 4. 핵심 메뉴 키워드 추출 (조사/접미사 제거)
         clean_kw = prompt
-        for word in ["추천해줘", "추천", "알려줘", "집", "식당", "맛집", "뭐가", "좋지", "있어"]:
-            clean_kw = clean_kw.replace(word, "")
-        clean_kw = clean_kw.strip()
+        for word in safe_to_remove:
+            clean_kw = clean_kw.replace(word, " ")
         
-        if len(clean_kw) >= 1:
-            res = res[res['상호명'].str.contains(clean_kw) | res['메뉴'].str.contains(clean_kw) | res['특징'].str.contains(clean_kw)]
+        # 특수문자(?, ! 등) 지우고 띄어쓰기 기준으로 쪼개기
+        clean_kw = re.sub(r'[^\w\s]', '', clean_kw)
+        words = clean_kw.split()
+        
+        # 은, 는, 이, 가 같은 조사와 꼬리표 단어 한 번 더 걸러내기
+        final_keywords = [w for w in words if w not in ["집", "곳", "뭐", "좀", "데", "거", "요", "은", "는", "이", "가", "을", "를"]]
 
-        # 결과 출력
+        # 💡 [필터 4] 최종 남은 알짜배기 단어로 다중 검색
+        for kw in final_keywords:
+            res = res[res['카테고리'].str.contains(kw) | res['상호명'].str.contains(kw) | res['메뉴'].str.contains(kw) | res['특징'].str.contains(kw)]
+
+        # 결과 도출
         if not res.empty:
             choice = res.sample(n=1).iloc[0]
-            show_result_detail(choice, reason)
+            show_restaurant_card(choice, ai_msg)
+            
             if len(res) > 1:
-                with st.expander(f"다른 {clean_kw} 후보지 더 보기"):
-                    st.dataframe(res[['카테고리', '상호명', '메뉴', '가격', '거리']], hide_index=True)
+                with st.expander(f"조건에 맞는 다른 후보지 {len(res)-1}곳 더 보기"):
+                    st.dataframe(res[['카테고리', '상호명', '메뉴', '가격', '예약']], hide_index=True)
         else:
-            st.error(f"앗, 데이터베이스에 '{clean_kw}'와(과) 관련된 정보가 아직 없네요 ㅠㅠ")
+            st.error(f"앗, 데이터베이스에 조건에 맞는 곳이 아직 없네요 ㅠㅠ 다른 메뉴를 말씀해 주시겠어요?")
 
-# --- 8. 사이드바 (카테고리 추가!) ---
+# --- 8. 사이드바 ---
 with st.sidebar:
     st.header("🗂️ 맛집 데이터베이스")
     st.caption("카테고리별 전체 리스트")
