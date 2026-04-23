@@ -8,16 +8,14 @@ st.set_page_config(page_title="구디 점심 대장", page_icon="🍜")
 st.title("🍜 구로 TP타워 점심 대장")
 st.caption("인사팀 민영님이 엄선한 구디 직장인 찐 맛집 리스트!")
 
-# --- 실시간 구로동 날씨 가져오기 (Open-Meteo 무료 API) ---
+# --- 실시간 구로동 날씨 가져오기 ---
 def get_current_weather():
-    # 구로디지털단지 근처 위도/경도
     url = "https://api.open-meteo.com/v1/forecast?latitude=37.483&longitude=126.897&current_weather=true"
     try:
         response = requests.get(url).json()
         temp = response['current_weather']['temperature']
         code = response['current_weather']['weathercode']
         
-        # 날씨 코드 해석
         if code in [51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99]:
             condition = "비"
         elif code in [71, 73, 75, 77, 85, 86]:
@@ -27,7 +25,6 @@ def get_current_weather():
         else:
             condition = "맑음"
             
-        # 시트에 있는 날씨 태그와 매칭
         if temp < 5 or condition == "눈":
             tag = "추움"
         elif condition == "비":
@@ -45,23 +42,37 @@ def get_current_weather():
 
 current_temp, current_condition, weather_tag = get_current_weather()
 
-# 화면에 현재 날씨 띄우기
 st.info(f"📍 실시간 구로동 날씨: **{current_condition}** ({current_temp}℃) \n\n 👉 현재 날씨인 **'{weather_tag}'** 키워드(또는 무관)가 포함된 메뉴를 찾아볼게요!")
 
 # --- 1. 구글 시트 연결 ---
 url = "https://docs.google.com/spreadsheets/d/1PP1HV-NWs3c_QjwuIVBu4H5gLl_A78JbPBLcTrVaz4A/edit?usp=sharing"
 conn = st.connection("gsheets", type=GSheetsConnection)
 df = conn.read(spreadsheet=url)
+df = df.dropna(how='all', axis=1) # 의미 없는 빈 열 완벽 제거
 df = df.fillna("")
 
-# 🚨 [에러 해결 핵심] 구글 시트 헤더 강제 덮어쓰기
-df.columns = ['카테고리', '상호명', '메뉴', '날씨', '거리', '특징', '가격', '지도']
+# 🚨 [가장 강력한 에러 해결 로직] 열 이름 자동 찾기 (개수/순서 무관)
+col_mapping = {}
+for col in df.columns:
+    col_str = str(col).lower()
+    if '상호' in col_str or 'name' in col_str: col_mapping[col] = '상호명'
+    elif '메뉴' in col_str or 'menu' in col_str: col_mapping[col] = '메뉴'
+    elif '날씨' in col_str or 'weather' in col_str: col_mapping[col] = '날씨'
+    elif '거리' in col_str or 'distance' in col_str: col_mapping[col] = '거리'
+    elif '특징' in col_str or '태그' in col_str: col_mapping[col] = '특징'
+    elif '가격' in col_str or 'price' in col_str: col_mapping[col] = '가격'
+    elif '지도' in col_str or 'url' in col_str: col_mapping[col] = '지도'
+
+df.rename(columns=col_mapping, inplace=True)
+
+# 필수 열이 비어있을 경우를 대비한 안전장치
+for required_col in ['상호명', '메뉴', '날씨', '거리', '특징', '가격', '지도']:
+    if required_col not in df.columns:
+        df[required_col] = ""
 
 # --- 2. 필터링 로직 ---
-# 실시간 날씨 태그가 포함되어 있거나, '무관'인 식당만 필터링
 filtered_df = df[df['날씨'].str.contains(weather_tag, na=False) | df['날씨'].str.contains("무관", na=False)]
 
-# 혹시 조건에 맞는 식당이 하나도 없으면 '무관' 식당이라도 보여주기
 if filtered_df.empty:
     filtered_df = df[df['날씨'].str.contains("무관", na=False)]
 
