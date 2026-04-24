@@ -4,8 +4,8 @@ import pandas as pd
 import requests
 import re
 
-# 1. 앱 설정 (기존 설정 유지)
-st.set_page_config(page_title="오점뭐?!", page_icon="🍜")
+# 1. 앱 설정 (레이아웃 및 디자인 고정)
+st.set_page_config(page_title="오점뭐?!", page_icon="🍜", layout="centered")
 
 st.title("🍜 오점뭐?!")
 st.caption("'오늘은 뭐 먹지?' 직장인 최대 고민 해결✨")
@@ -29,7 +29,7 @@ def get_detailed_weather():
 
 temp, feels_like, humidity, wind, rain, condition, weather_tag = get_detailed_weather()
 
-# --- 3. [대시보드] 현재 정보 (민영님 디자인 유지) ---
+# --- 3. [대시보드] 현재 정보 ---
 st.subheader("현재 정보")
 c1, c2 = st.columns([1, 1.2])
 with c1:
@@ -41,7 +41,7 @@ with c2:
 st.caption(f"습도 {humidity}% | 강수 {rain}mm | 풍속 {wind}m/s | 하늘: {condition}")
 st.write("")
 
-# --- 4. AI 규칙 박스 (민영님 디자인 유지) ---
+# --- 4. AI 규칙 박스 ---
 st.markdown(f"""
 <div style="background-color: #f0f2f6; padding: 20px; border-radius: 12px; border-left: 5px solid #ff4b4b;">
     <div style="display: flex; align-items: center; margin-bottom: 15px;">
@@ -54,7 +54,7 @@ st.markdown(f"""
     <ul style="margin-bottom: 15px;"><li>온도: "{temp}℃" | 하늘: "{condition}"</li></ul>
     <h3 style="font-size: 18px; margin-bottom: 5px;">한국 음식 문화 규칙</h3>
     <ol style="font-size: 14px; line-height: 1.6;">
-        <li>비가 오면 국물, 전, 칼국수, 수제비 선호</li>
+        <li>비가 오면 전, 칼국수, 수제비, 국물 요리 선호</li>
         <li>더우면 냉면이나 샐러드, 추우면 찌개나 뜨거운 국물 선호</li>
         <li>회식 다음 날은 무조건 해장 키워드 반영</li>
     </ol>
@@ -65,12 +65,11 @@ st.write("")
 st.info("📢 **여러분의 참여로 더 좋아집니다!** 직접 다녀오신 맛집의 실제 후기와 별점을 남겨주세요. \n\n👉 [**맛집 리스트 참여 및 별점 남기러 가기 (클릭)**](https://docs.google.com/spreadsheets/d/1PP1HV-NWs3c_QjwuIVBu4H5gLl_A78JbPBLcTrVaz4A/edit?usp=sharing)")
 st.write("")
 
-# --- 5. 데이터 연결 및 전처리 (별점 로직 최적화) ---
+# --- 5. 데이터 연결 및 전처리 ---
 url = "https://docs.google.com/spreadsheets/d/1PP1HV-NWs3c_QjwuIVBu4H5gLl_A78JbPBLcTrVaz4A/edit?usp=sharing"
 conn = st.connection("gsheets", type=GSheetsConnection)
 df = conn.read(spreadsheet=url).dropna(how='all', axis=1).fillna("")
 
-# 열 이름 매칭 (시트에서 계산한 '평균별점' 열 활용)
 col_mapping = {}
 for col in df.columns:
     c = str(col).lower().replace(" ", "")
@@ -80,46 +79,56 @@ for col in df.columns:
     elif '가격' in c: col_mapping[col] = '가격'
     elif '거리' in c: col_mapping[col] = '거리'
     elif '예약' in c: col_mapping[col] = '예약'
-    elif '특징' in c: col_mapping[col] = '특징'
+    elif '특징' in c or '태그' in c: col_mapping[col] = '특징'
     elif '지도' in c: col_mapping[col] = '지도'
     elif '사진' in c: col_mapping[col] = '사진'
-    elif '평균별점' in c or '평균' in c: col_mapping[col] = '평균별점' # 엑셀 수식 결과값
+    elif '평균' in c: col_mapping[col] = '평균별점'
     elif '후기' in c: col_mapping[col] = '후기'
 df.rename(columns=col_mapping, inplace=True)
 
-# 필수 열 자동 생성 (에러 방지)
 for c in ['카테고리', '상호명', '메뉴', '가격', '거리', '예약', '특징', '지도', '사진', '평균별점', '후기']:
     if c not in df.columns: df[c] = ""
 
-# 별점 숫자를 예쁜 별 모양으로 바꾸는 함수 (코딩으로 처리!)
 def get_stars(rating):
     try:
+        if rating == "" or pd.isna(rating): return "평가 없음"
         r = float(rating)
-        if r <= 0: return "신규 맛집 (첫 별점을 남겨주세요!)"
-        full_stars = int(r)
-        half_star = "✫" if (r - full_stars) >= 0.5 else ""
-        return f"{'⭐' * full_stars}{half_star} ({round(r, 1)}점)"
+        if r <= 0: return "평가 없음"
+        return f"{'⭐' * int(r)}{'✫' if (r % 1) >= 0.5 else ''} ({round(r, 1)}점)"
     except: return "평가 없음"
 
-def show_restaurant_card(row, ai_reason="동료들이 직접 추천한 맛집입니다!"):
+# 상세 정보 카드 함수 (해시태그 복구!)
+def show_restaurant_card(row, ai_reason="민영님이 선정한 맛집입니다!"):
     st.write(f"🤖 **AI 추천 포인트:** {ai_reason}")
-    if row['사진'] != "": st.image(row['사진'], use_container_width=True)
+    if str(row.get('사진', '')) != "": st.image(row['사진'], use_container_width=True)
     
-    # 시트의 평균별점 숫자를 별 모양으로 변환해서 출력
     star_display = get_stars(row.get('평균별점', 0))
     st.success(f"**[{row['상호명']}]** \n\n {star_display}")
     
     cc1, cc2 = st.columns(2)
     with cc1:
-        st.write(f"🍴 **대표메뉴:** {row['메뉴']}")
-        st.write(f"💰 **가격:** {row['가격']}원")
+        st.write(f"🍴 **대표메뉴:** {row.get('메뉴', '정보 없음')}")
+        st.write(f"💰 **가격:** {row.get('가격', '정보 없음')}원")
     with cc2:
-        st.write(f"📍 **도보 거리:** {row['거리']}")
-        st.write(f"🗓️ **예약:** {row['예약']}")
+        st.write(f"📍 **도보 거리:** {row.get('거리', '정보 없음')}")
+        st.write(f"🗓️ **예약:** {row.get('예약', 'X')}")
     
-    if row.get('후기') != "": st.warning(f"💬 **최근 동료 후기:** {row['후기']}")
-    else: st.info(f"💬 **특징:** {row['특징']}")
-    if row['지도'] != "": st.markdown(f"[🗺️ 네이버 지도 바로보기]({row['지도']})")
+    # --- 🚨 해시태그 및 특징 복구 구간 ---
+    char_text = str(row.get('특징', '')).strip()
+    review_text = str(row.get('후기', '')).strip()
+    
+    if char_text != "" and char_text != "nan":
+        # 특징/태그를 해시태그 형태로 예쁘게 출력
+        tags = [f"#{t.strip()}" for t in char_text.split(',') if t.strip()]
+        st.markdown(f"<div style='color: #007bff; font-weight: bold;'>{' '.join(tags)}</div>", unsafe_allow_html=True)
+        st.info(f"💬 **특징:** {char_text}")
+    
+    if review_text != "" and review_text != "nan":
+        st.warning(f"💬 **최근 동료 후기:** {review_text}")
+    # ---------------------------------------
+        
+    if str(row.get('지도', '')) != "":
+        st.markdown(f"[🗺️ 네이버 지도 바로보기]({row['지도']})")
 
 # --- 6. 랜덤 추천 버튼 ---
 st.write("---")
@@ -129,10 +138,11 @@ if st.button("🎲 오늘 날씨에 딱 맞는 메뉴 랜덤 추천!", use_conta
     elif temp >= 25: kw = ["냉면", "소바", "국수", "샐러드", "시원"]
     elif temp <= 5: kw = ["찌개", "탕", "국밥", "샤브", "고기"]
     pattern = '|'.join(kw) if kw else ".*"
-    filtered_df = df[df['메뉴'].str.contains(pattern) | df['특징'].str.contains(pattern)]
+    filtered_df = df[df['메뉴'].str.contains(pattern, na=False) | df['특징'].str.contains(pattern, na=False)]
     if filtered_df.empty: filtered_df = df
     st.balloons()
-    show_restaurant_card(filtered_df.sample(n=1).iloc[0], f"현재 날씨({temp}℃)를 고려한 추천입니다!")
+    choice = filtered_df.sample(n=1).iloc[0]
+    show_restaurant_card(choice, f"현재 날씨({temp}℃)를 고려한 추천입니다!")
 
 # --- 7. 지능형 챗봇 ---
 if prompt := st.chat_input("가성비 맛집, 별점 높은 곳, 추울 때 뭐 먹지?"):
@@ -141,9 +151,7 @@ if prompt := st.chat_input("가성비 맛집, 별점 높은 곳, 추울 때 뭐 
         res = df.copy()
         ai_msg, condition_applied = "분석 완료!", False
         p_ns = prompt.replace(" ", "")
-        
-        if any(w in p_ns for w in ["만원이하", "가성비", "저렴"]):
-            # 가격 필터링을 위해 숫자 변환
+        if any(w in p_ns for w in ["만원", "가성비", "저렴"]):
             res['num_p'] = pd.to_numeric(res['가격'].astype(str).str.replace(',', '').str.replace('원', ''), errors='coerce').fillna(999999)
             res = res[res['num_p'] <= 10000]
             ai_msg, condition_applied = "10,000원 이하 가성비 맛집입니다! 💸", True
@@ -152,26 +160,24 @@ if prompt := st.chat_input("가성비 맛집, 별점 높은 곳, 추울 때 뭐 
             res = res.sort_values(by='tmp_s', ascending=False)
             ai_msg, condition_applied = "동료 평점이 가장 높은 순서입니다! ⭐", True
 
-        # 키워드 필터링
         clean = prompt
         for w in ["추천", "알려줘", "맛집", "식당", "메뉴", "음식", "오늘", "점심"]: clean = clean.replace(w, " ")
         words = re.sub(r'[^\w\s]', '', clean).split()
         final_kws = [w for w in words if w not in ["은", "는", "이", "가", "을", "를", "좀", "데", "거", "요"]]
-
         backup = res.copy()
         for kw in final_kws:
-            res = res[res['카테고리'].str.contains(kw) | res['상호명'].str.contains(kw) | res['메뉴'].str.contains(kw) | res['특징'].str.contains(kw)]
-
+            res = res[res['카테고리'].str.contains(kw, na=False) | res['상호명'].str.contains(kw, na=False) | res['메뉴'].str.contains(kw, na=False)]
         if res.empty and condition_applied and not backup.empty: res = backup
         if not res.empty:
             show_restaurant_card(res.iloc[0], ai_msg)
             if len(res) > 1:
                 with st.expander(f"다른 후보지 {len(res)-1}곳 더 보기"):
                     st.dataframe(res[['카테고리', '상호명', '메뉴', '평균별점']], hide_index=True)
-        else: st.error("조건에 맞는 맛집을 찾지 못했어요 ㅠㅠ")
+        else: st.error("조건에 맞는 맛집을 찾지 못했어요.")
 
-# --- 8. 사이드바 (기존 디자인 유지) ---
+# --- 8. 사이드바 (레이아웃 유지) ---
 with st.sidebar:
     st.header("🗂️ 맛집 데이터베이스")
     st.caption("동료들의 참여로 업데이트 중!")
-    st.dataframe(df[['카테고리', '상호명', '평균별점', '메뉴']], hide_index=True, use_container_width=True, height=700)
+    valid_cols = [c for c in ['카테고리', '상호명', '평균별점', '메뉴'] if c in df.columns]
+    st.dataframe(df[valid_cols], hide_index=True, use_container_width=True, height=700)
