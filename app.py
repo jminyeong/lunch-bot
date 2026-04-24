@@ -96,7 +96,7 @@ def get_stars(rating):
         return f"{'⭐' * int(r)}{'✫' if (r % 1) >= 0.5 else ''} ({round(r, 1)}점)"
     except: return "평가 없음"
 
-# 상세 정보 카드 함수 (해시태그만 깔끔하게 유지)
+# 상세 정보 카드 함수 (해시태그 깔끔 정리)
 def show_restaurant_card(row, ai_reason="민영님이 선정한 맛집입니다!"):
     st.write(f"🤖 **AI 추천 포인트:** {ai_reason}")
     if str(row.get('사진', '')) != "": 
@@ -113,7 +113,7 @@ def show_restaurant_card(row, ai_reason="민영님이 선정한 맛집입니다!
         st.write(f"📍 **도보 거리:** {row.get('거리', '정보 없음')}")
         st.write(f"🗓️ **예약:** {row.get('예약', 'X')}")
     
-    # --- 특징/해시태그 깔끔 정리 ---
+    # 특징/해시태그 표시
     char_text = str(row.get('특징', '')).strip()
     if char_text != "" and char_text != "nan":
         raw_tags = re.split(r'[ ,#]+', char_text)
@@ -138,43 +138,49 @@ if st.button("🎲 오늘 날씨에 딱 맞는 메뉴 랜덤 추천!", use_conta
     choice = filtered_df.sample(n=1).iloc[0]
     show_restaurant_card(choice, f"현재 날씨({temp}℃)를 고려한 추천입니다!")
 
-# --- 7. 지능형 챗봇 (가장 강력한 검색 엔진!) ---
-if prompt := st.chat_input("예약 가능한 부대찌개 집, 배 안 고픈데 가벼운 거"):
+# --- 7. 지능형 챗봇 (해시태그 검색 강화!) ---
+if prompt := st.chat_input("친절한 곳, 가성비 맛집, 예약 가능한 부대찌개"):
     with st.chat_message("user"): st.write(prompt)
     with st.chat_message("assistant"):
         res = df.copy()
         ai_msg, condition_applied = "분석 완료!", False
         p_ns = prompt.replace(" ", "")
 
-        # 가벼운 식사/배 안 고픈 상태 감지
-        if any(w in p_ns for w in ["안고파", "배불", "가볍", "간단", "안고픈"]):
+        # 💡 [필터 1] 가벼운 식사/상태 감지
+        if any(w in p_ns for w in ["안고파", "배불", "가볍", "간단"]):
             res = res[res['메뉴'].str.contains("샐러드|포케|샌드위치|김밥|국수|우동") | res['특징'].str.contains("가벼운|가볍|다이어트|간단")]
-            ai_msg, condition_applied = "배가 많이 안 고프실 땐 무겁지 않은 가벼운 메뉴가 최고죠! 🥗", True
+            ai_msg, condition_applied = "배가 많이 안 고프실 땐 가벼운 메뉴가 최고죠! 🥗", True
 
-        # 가성비 감지
+        # 💡 [필터 2] 가성비
         if any(w in p_ns for w in ["만원", "가성비", "저렴"]):
             res['num_p'] = pd.to_numeric(res['가격'].astype(str).str.replace(',', '').str.replace('원', ''), errors='coerce').fillna(999999)
             res = res[res['num_p'] <= 10000]
             ai_msg, condition_applied = "10,000원 이하 가성비 맛집입니다! 💸", True
         
-        # 예약 여부 감지
+        # 💡 [필터 3] 예약
         if "예약" in prompt:
             res = res[res['예약'].astype(str).str.upper().str.contains("O", na=False)]
-            ai_msg, condition_applied = "요청하신 예약 가능한 식당으로 찾았습니다! 🗓️", True
+            ai_msg, condition_applied = "예약 가능한 식당으로 찾았습니다! 🗓️", True
 
-        # 💡 핵심: 키워드 분해 검색 (이게 "예약 가능한 부대찌개 집"을 잡는 비결!)
+        # 💡 [핵심] 키워드 정제 및 '특징(해시태그)' 열 포함 다중 검색
         clean = prompt
-        stop_words = ["추천", "알려줘", "맛집", "식당", "메뉴", "음식", "오늘", "점심", "저녁", "집", "곳", "뭐먹지", "뭐먹을까", "가능한"]
+        stop_words = ["추천", "알려줘", "맛집", "식당", "메뉴", "음식", "오늘", "점심", "저녁", "집", "곳", "뭐먹지", "어디야", "있는", "곳은"]
         for w in stop_words: clean = clean.replace(w, " ")
         words = re.sub(r'[^\w\s]', '', clean).split()
+        
+        # 은/는/이/가/좀 등 조사 제거
         final_kws = [w for w in words if w not in ["은", "는", "이", "가", "을", "를", "좀", "데", "거", "요", "때"]]
         
         backup = res.copy()
-        # 모든 키워드가 포함된 행을 찾음
         for kw in final_kws:
-            res = res[res['카테고리'].str.contains(kw, na=False) | res['상호명'].str.contains(kw, na=False) | res['메뉴'].str.contains(kw, na=False) | res['특징'].str.contains(kw, na=False)]
+            # 🚨 상호명, 메뉴뿐만 아니라 '특징(해시태그)' 열에서도 키워드를 찾습니다!
+            res = res[
+                res['카테고리'].str.contains(kw, na=False) | 
+                res['상호명'].str.contains(kw, na=False) | 
+                res['메뉴'].str.contains(kw, na=False) | 
+                res['특징'].str.contains(kw, na=False)
+            ]
         
-        # 키워드 검색 결과가 없으면 필터링 결과(가성비 등)만이라도 보여줌
         if res.empty and condition_applied and not backup.empty: res = backup
         
         if not res.empty:
@@ -183,7 +189,7 @@ if prompt := st.chat_input("예약 가능한 부대찌개 집, 배 안 고픈데
                 with st.expander(f"다른 후보지 {len(res)-1}곳 더 보기"):
                     st.dataframe(res[['카테고리', '상호명', '메뉴', '평균별점']], hide_index=True)
         else: 
-            st.error("조건에 맞는 맛집을 찾지 못했어요. 다른 메뉴를 말씀해 주시겠어요?")
+            st.error("조건에 맞는 맛집을 찾지 못했어요. 다른 키워드로 검색해 보세요!")
 
 # --- 8. 사이드바 (디자인 고정) ---
 with st.sidebar:
